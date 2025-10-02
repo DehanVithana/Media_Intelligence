@@ -369,25 +369,52 @@ def jaccard_keywords(a: str, b: str) -> float:
     return len(A & B) / len(A | B)
 
 
-def framing_divergence(df: pd.DataFrame, cluster_id: int):
+def framing_divergence(df: pd.DataFrame, cluster_id: int) -> pd.DataFrame:
     """
     Compare language-specific framing within a single cluster via lexical divergence.
+
+    Robust against clusters with <2 languages or empty pair generation.
+    Returns a DataFrame with columns ["pair", "jaccard", "len_diff"] or empty with same schema.
     """
-    g = df[df["cluster_id"] == cluster_id]
-    if g.empty: 
-        return pd.DataFrame(columns=["pair","jaccard","len_diff"])
-    # For each lang pair, compute Jaccard distance and length difference
+    # Always return a DF with the right columns if we have nothing to compare
+    EMPTY = pd.DataFrame(columns=["pair", "jaccard", "len_diff"])
+
+    # Guard: cluster subset
+    g = df[df.get("cluster_id") == cluster_id]
+    if g is None or g.empty:
+        return EMPTY
+
+    # Guard: ensure we actually have language info and >1 language
+    if "lang" not in g.columns:
+        return EMPTY
+    langs = g["lang"].dropna().unique().tolist()
+    if len(langs) < 2:
+        return EMPTY
+
+    # Build language-pair comparisons
     pairs = []
-    for la, gb in g.groupby("lang"):
-        for lb, gc in g.groupby("lang"):
-            if la >= lb: 
+    # Group once to avoid recomputation
+    grouped = {la: gb for la, gb in g.groupby("lang")}
+    for i, la in enumerate(langs):
+        for lb in langs[i+1:]:
+            gb = grouped.get(la)
+            gc = grouped.get(lb)
+            if gb is None or gc is None or gb.empty or gc.empty:
                 continue
             a = " ".join(gb["title"].astype(str).tolist())
             b = " ".join(gc["title"].astype(str).tolist())
-            jac = jaccard_keywords(a, b)
+            jac = jaccard_keywords(a, b)  # 0..1 (higher=more similar)
             len_diff = abs(len(a) - len(b)) / (1 + (len(a)+len(b))/2)
-            pairs.append({"pair": f"{la} vs {lb}", "jaccard": jac, "len_diff": len_diff})
-    return pd.DataFrame(pairs).sort_values("jaccard")
+            pairs.append({"pair": f"{la} vs {lb}", "jaccard": float(jac), "len_diff": float(len_diff)})
+
+    if not pairs:
+        return EMPTY
+
+    df_pairs = pd.DataFrame(pairs)
+    # Extra guard: only sort if column exists
+    if "jaccard" in df_pairs.columns:
+        return df_pairs.sort_values("jaccard", ascending=True, kind="mergesort").reset_index(drop=True)
+    return df_pairs.reset_index(drop=True)
 
 
 def who_covers_next_baseline(df: pd.DataFrame, horizon_hours=PRED_PICKUP_HOURS):
@@ -657,6 +684,16 @@ with tab4:
     st.subheader("Framing Divergence across Languages")
     st.caption("Lexical Jaccard similarity and length difference across si/ta/en within a story cluster.")
     sel_cid2 = st.selectbox("Select cluster for framing", story_df["cluster_id"].tolist()[:500])
+    
+    # Before showing the selectbox in Tab 4
+    if story_df.empty:
+      st.info("No clusters available in the selected date range.")
+    else:
+      sel_cid2 = st.selectbox(
+        "Select cluster for framing",
+        story_df["cluster_id"].tolist()[:500]
+    )
+
     fd = framing_divergence(df, sel_cid2)
     if fd.empty:
         st.info("Not enough language variation in this cluster.")
@@ -665,6 +702,11 @@ with tab4:
         fig = px.bar(fd, x="pair", y="jaccard", title="Jaccard similarity (higher → more similar)",
                      range_y=[0,1])
         st.plotly_chart(fig, use_container_width=True)
+
+    
+    langs_in_cluster = df.loc[df["cluster_id"] == sel_cid2, "lang"].dropna().unique().tolist()
+    st.caption(f"Languages in this cluster: {', '.join(langs_in_cluster) if langs_in_cluster else 'N/A'}")
+
 
 
 # ---- TAB 5: OUTLET SIMILARITY ----
@@ -690,3 +732,4 @@ st.markdown(
     "• Example of `ext_articles` translation JSON structure: "
     "[689cd094.ext.json](https://github.com/nuuuwan/news_lk3_data/blob/main/ext_articles/689cd094.ext.json)"
 )
+
