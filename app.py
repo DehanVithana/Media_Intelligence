@@ -557,11 +557,12 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ---- TAB 1: BREAKING RADAR ----
+
 with tab1:
     st.subheader("Breaking Radar (newest clusters)")
 
     # Show the N newest clusters by origin_time
-    n_show = st.slider("How many recent clusters?", 10, 200, 50, step=10)
+    n_show = st.slider("How many recent clusters?", 10, 200, 50, step=10, key="tab1_n_show"
     radar = story_df.head(n_show).copy()
 
     # Predict who covers next for each cluster, using origin outlet + lang + momentum
@@ -604,9 +605,14 @@ with tab2:
     # Interactive cluster diffusion map
     st.markdown("### Story Diffusion Graph (select a cluster)")
     cluster_choices = story_df["cluster_id"].tolist()
-    sel_cid = st.selectbox("Cluster", cluster_choices[:500] if len(cluster_choices)>500 else cluster_choices)
+    sel_cid = st.selectbox(
+        "Cluster",
+        cluster_choices[:500] if len(cluster_choices) > 500 else cluster_choices,
+        key="tab2_cluster"  # <-- unique key
+    )
 
     g = df[df["cluster_id"] == sel_cid].sort_values("ts")
+
     if g.empty:
         st.info("No data for selected cluster.")
     else:
@@ -680,32 +686,37 @@ with tab3:
 
 
 # ---- TAB 4: FRAMING LENS ----
+# ---- TAB 4: FRAMING LENS ----
 with tab4:
     st.subheader("Framing Divergence across Languages")
     st.caption("Lexical Jaccard similarity and length difference across si/ta/en within a story cluster.")
-    sel_cid2 = st.selectbox("Select cluster for framing", story_df["cluster_id"].tolist()[:500])
-    
-    # Before showing the selectbox in Tab 4
+
     if story_df.empty:
-      st.info("No clusters available in the selected date range.")
+        st.info("No clusters available in the selected date range.")
     else:
-      sel_cid2 = st.selectbox(
-        "Select cluster for framing",
-        story_df["cluster_id"].tolist()[:500]
-    )
+        framing_choices = story_df["cluster_id"].dropna().unique().tolist()
+        framing_choices = framing_choices[:500]
+        sel_cid2 = st.selectbox(
+            "Select cluster for framing",
+            framing_choices,
+            key="tab4_cluster"  # <-- unique key
+        )
 
-    fd = framing_divergence(df, sel_cid2)
-    if fd.empty:
-        st.info("Not enough language variation in this cluster.")
-    else:
-        st.dataframe(fd, use_container_width=True)
-        fig = px.bar(fd, x="pair", y="jaccard", title="Jaccard similarity (higher → more similar)",
-                     range_y=[0,1])
-        st.plotly_chart(fig, use_container_width=True)
+        fd = framing_divergence(df, sel_cid2)
+        if fd.empty:
+            st.info("Not enough language variation in this cluster.")
+        else:
+            st.dataframe(fd, use_container_width=True)
+            fig = px.bar(
+                fd, x="pair", y="jaccard",
+                title="Jaccard similarity (higher → more similar)",
+                range_y=[0, 1]
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-    
-    langs_in_cluster = df.loc[df["cluster_id"] == sel_cid2, "lang"].dropna().unique().tolist()
-    st.caption(f"Languages in this cluster: {', '.join(langs_in_cluster) if langs_in_cluster else 'N/A'}")
+        # (Optional) show languages present in this cluster
+        langs_in_cluster = df.loc[df["cluster_id"] == sel_cid2, "lang"].dropna().unique().tolist()
+
 
 
 
@@ -732,4 +743,5 @@ st.markdown(
     "• Example of `ext_articles` translation JSON structure: "
     "[689cd094.ext.json](https://github.com/nuuuwan/news_lk3_data/blob/main/ext_articles/689cd094.ext.json)"
 )
+
 
