@@ -1,124 +1,140 @@
 import streamlit as st
 import pandas as pd
-from itertools import combinations
-import random # Used for mock data generation
+import altair as alt
 
-# Global Constants/Setup (Mocked for demonstration)
-CLUSTER_COL = 'cluster_id' 
-ENTITY_COL = 'entity_name'
-FRAME_COL = 'frames' 
-
-st.set_page_config(layout="wide", page_title="Media Intelligence Divergence Fix")
-
-# --- Utility Functions (Mocked for demonstration) ---
-
-def generate_mock_data(n_rows=50):
-    """Generates mock data resembling media framing analysis."""
-    data = {
-        ENTITY_COL: [f'Entity_{i % 10}' for i in range(n_rows)],
-        CLUSTER_COL: [f'C{i % 3}' for i in range(n_rows)],
-        FRAME_COL: [random.sample(['economic', 'social', 'political', 'health', 'environmental'], k=random.randint(1, 3)) for _ in range(n_rows)],
-        'article_id': [i for i in range(n_rows)],
-    }
-    return pd.DataFrame(data)
-
-# --- CORRECTED FUNCTION (Relevant block for line 390) ---
-
-def framing_divergence(df: pd.DataFrame, sel_cid2: str) -> pd.DataFrame:
-    """
-    Calculates the Jaccard divergence (distance) between frame sets
-    of different entities within a selected cluster.
-
-    The original code failed because when 'pairs' was empty (e.g., if sel_cid2 
-    filtered out all data), pd.DataFrame(pairs) had no columns, leading to a 
-    KeyError when attempting to sort by the 'jaccard' column.
-    
-    The fix is to check if 'pairs' is empty and, if so, return a blank 
-    DataFrame with the expected columns defined.
-    """
-    st.subheader(f"Framing Divergence for Cluster: {sel_cid2}")
-
-    # 1. Filter data based on selected cluster ID
-    filtered_df = df[df[CLUSTER_COL] == sel_cid2]
-
-    if filtered_df.empty:
-        st.info(f"Selected cluster '{sel_cid2}' has no data to analyze.")
-        # Return an empty DataFrame with defined columns to prevent errors downstream
-        return pd.DataFrame([], columns=["entity_a", "entity_b", "jaccard"])
-
-    # 2. Aggregate unique frames for each entity in the cluster
-    entity_frames = filtered_df.groupby(ENTITY_COL)[FRAME_COL].apply(
-        lambda x: set(frame for sublist in x for frame in sublist)
-    ).to_dict()
-
-    entity_names = list(entity_frames.keys())
-    pairs = []
-
-    # 3. Calculate Jaccard similarity for all unique pairs of entities
-    for entity_a, entity_b in combinations(entity_names, 2):
-        set_a = entity_frames[entity_a]
-        set_b = entity_frames[entity_b]
-        
-        intersection_size = len(set_a.intersection(set_b))
-        union_size = len(set_a.union(set_b))
-        
-        # Calculate Jaccard Similarity (1 is max similarity, 0 is min)
-        jaccard_similarity = intersection_size / union_size if union_size > 0 else 0
-        
-        pairs.append({
-            "entity_a": entity_a,
-            "entity_b": entity_b,
-            "jaccard": jaccard_similarity, # <-- CRITICAL: Key must match sorting name
-        })
-
-    # --- Line 390 in the original context (now corrected logic) ---
-    if not pairs:
-        # This check is vital. It handles the case where there is only one 
-        # entity in the cluster, so no combinations were created.
-        st.info("Less than two entities found in this cluster. Cannot calculate divergence.")
-        return pd.DataFrame([], columns=["entity_a", "entity_b", "jaccard"]) 
-
-    # CORRECTED LINE 390 (The sort_values call now works reliably)
-    return pd.DataFrame(pairs).sort_values("jaccard", ascending=False)
-# --- End of CORRECTED FUNCTION ---
-
-
-# --- Streamlit Main App Logic ---
-
-# 1. Load Data
-df = generate_mock_data()
-available_clusters = df[CLUSTER_COL].unique()
-
-st.title("📊 Media Intelligence: Framing Divergence Analysis")
-st.markdown("This app calculates the Jaccard similarity between the unique frames used by different entities within a selected cluster. High 'jaccard' score means low divergence.")
-
-# 2. Sidebar/Selection
-st.sidebar.header("Controls")
-sel_cid2 = st.sidebar.selectbox(
-    "Select Cluster ID to analyze:",
-    options=available_clusters,
-    index=0
+# --- Configuration ---
+st.set_page_config(
+    page_title="LK News Data Insights",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# 3. Run Analysis (This is where line 660 occurs)
-try:
-    # This calls framing_divergence, which now returns a safe DataFrame
-    fd = framing_divergence(df, sel_cid2) 
+# --- Data Loading and Preprocessing ---
+@st.cache_data
+def load_data():
+    """Loads and preprocesses the news data."""
+    try:
+        # NOTE: Replace 'lk_news.csv' with the actual file name if it differs
+        df = pd.read_csv('lk_news.csv')
+
+        # Convert 'time' to datetime, assuming it's the primary date column
+        if 'time' in df.columns:
+            df['time'] = pd.to_datetime(df['time'], errors='coerce')
+            df.dropna(subset=['time'], inplace=True)
+        else:
+            st.error("Data missing required 'time' column.")
+            return pd.DataFrame() # Return empty DataFrame on failure
+
+        # Basic cleanup for 'source' and 'topic'
+        if 'source' not in df.columns:
+            # Placeholder for 'source' if missing, but it's a critical feature
+            df['source'] = 'Unknown Source'
+        if 'topic' not in df.columns:
+            # Placeholder for 'topic' if missing (real implementation would use NLP)
+            df['topic'] = 'Uncategorized'
+
+        return df
+    except FileNotFoundError:
+        st.error("Error: 'lk_news.csv' not found. Please ensure the data file is in the same directory.")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"An error occurred during data loading: {e}")
+        return pd.DataFrame()
+
+df = load_data()
+
+# --- Streamlit Dashboard Layout ---
+st.title("🇱🇰 Sri Lanka News Dataset Analysis")
+
+if not df.empty:
+    st.sidebar.header("Filter & Settings")
+
+    # Date Range Filter
+    min_date = df['time'].min().date()
+    max_date = df['time'].max().date()
+    date_range = st.sidebar.slider(
+        "Select Date Range",
+        min_value=min_date,
+        max_value=max_date,
+        value=(min_date, max_date),
+        format="YYYY-MM-DD"
+    )
+
+    df_filtered = df[
+        (df['time'].dt.date >= date_range[0]) &
+        (df['time'].dt.date <= date_range[1])
+    ]
+
+    st.markdown(f"**Total Articles Analyzed:** {len(df_filtered):,}")
+    st.markdown("---")
+
+    col1, col2 = st.columns(2)
+
+    # =========================================================================
+    # METRIC 1: News Volume Over Time
+    # =========================================================================
+    with col1:
+        st.subheader("📰 News Volume Over Time")
+        
+        # Aggregate by day
+        volume_df = df_filtered.set_index('time').resample('D').size().reset_index(name='Article_Count')
+
+        chart_volume = alt.Chart(volume_df).mark_line(point=True).encode(
+            x=alt.X('time', title='Date'),
+            y=alt.Y('Article_Count', title='Article Count'),
+            tooltip=[alt.Tooltip('time', format='%Y-%m-%d', title='Date'), 'Article_Count']
+        ).properties(
+            title="Daily Article Count"
+        ).interactive()
+
+        st.altair_chart(chart_volume, use_container_width=True)
+
+
+    # =========================================================================
+    # METRIC 2: Source Coverage Distribution
+    # =========================================================================
+    with col2:
+        st.subheader("🗞️ Article Distribution by Source")
+
+        # Aggregate by source
+        source_df = df_filtered['source'].value_counts().reset_index(name='Article_Count')
+        source_df.columns = ['Source', 'Article_Count']
+        
+        # Allow user to select top N sources
+        top_n_sources = st.sidebar.slider("Top N Sources to Display", 5, 20, 10)
+        source_df = source_df.head(top_n_sources)
+        
+        chart_source = alt.Chart(source_df).mark_bar().encode(
+            x=alt.X('Article_Count', title='Article Count'),
+            y=alt.Y('Source', sort='-x', title='News Source'),
+            tooltip=['Source', 'Article_Count']
+        ).properties(
+            title=f"Top {top_n_sources} News Sources by Volume"
+        )
+        
+        st.altair_chart(chart_source, use_container_width=True)
     
     st.markdown("---")
-    st.subheader("Results: Entity Divergence (by Jaccard Similarity)")
-    st.dataframe(fd, use_container_width=True)
 
-    if not fd.empty:
-        # Display the most similar pair (Highest Jaccard score)
-        most_similar = fd.iloc[0]
-        st.metric(
-            "Most Similar Entities (Lowest Divergence)", 
-            f"{most_similar['entity_a']} & {most_similar['entity_b']}", 
-            f"Jaccard: {most_similar['jaccard']:.3f}"
-        )
+    # =========================================================================
+    # METRIC 3: Top Topic Distribution (requires 'topic' column)
+    # =========================================================================
+    st.subheader("🔥 Top Topic Distribution")
     
-except KeyError as e:
-    # Fallback error handling for any unexpected KeyErrors
-    st.error(f"An internal error occurred: Missing column {e}. The divergence calculation failed.")
-    st.warning("Please ensure your data contains the expected columns for grouping and frames.")
+    # Aggregate by topic
+    topic_df = df_filtered['topic'].value_counts().reset_index(name='Article_Count')
+    topic_df.columns = ['Topic', 'Article_Count']
+    
+    top_n_topics = st.slider("Top N Topics to Display", 5, 20, 10)
+    topic_df = topic_df.head(top_n_topics)
+
+    chart_topic = alt.Chart(topic_df).mark_bar().encode(
+        x=alt.X('Article_Count', title='Article Count'),
+        y=alt.Y('Topic', sort='-x', title='Topic'),
+        tooltip=['Topic', 'Article_Count'],
+        color=alt.Color('Topic', legend=None)
+    ).properties(
+        title=f"Top {top_n_topics} Topics by Article Count"
+    )
+
+    st.altair_chart(chart_topic, use_container_width=True)
