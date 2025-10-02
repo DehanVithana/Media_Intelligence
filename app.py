@@ -562,7 +562,7 @@ with tab1:
     st.subheader("Breaking Radar (newest clusters)")
 
     # Show the N newest clusters by origin_time
-    n_show = st.slider("How many recent clusters?", 10, 200, 50, step=10, key="tab1_n_show"
+    n_show = st.slider("How many recent clusters?", 10, 200, 50, step=10, key="tab1_n_show")
     radar = story_df.head(n_show).copy()
 
     # Predict who covers next for each cluster, using origin outlet + lang + momentum
@@ -743,5 +743,6 @@ st.markdown(
     "• Example of `ext_articles` translation JSON structure: "
     "[689cd094.ext.json](https://github.com/nuuuwan/news_lk3_data/blob/main/ext_articles/689cd094.ext.json)"
 )
+
 
 
