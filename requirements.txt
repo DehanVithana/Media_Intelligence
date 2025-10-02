@@ -1,0 +1,10 @@
+streamlit==1.39.0
+pandas>=2.0
+numpy>=1.24
+plotly>=5.22
+datasets>=2.20
+networkx>=3.2
+scikit-learn>=1.4
+sentence-transformers>=3.0
+hdbscan>=0.8.38
+umap-learn>=0.5.6
